@@ -7,7 +7,7 @@ import * as path from 'path';
 
 export const SILERO_FRAME_SIZE = 512;
 const SAMPLE_RATE = 16000;
-const STATE_SIZE = 64;
+const STATE_SIZE = 128;
 const NUM_LAYERS = 2;
 
 export interface VADResult {
@@ -54,10 +54,18 @@ export class SileroVAD {
       state: this.state,
     });
 
-    // Update state for next frame
-    this.state = results['stateN'] as ort.Tensor;
+    // Log output keys on first run to verify model output names
+    const keys = Object.keys(results);
+    if (keys.length > 0) {
+      const outputNames = keys.join(', ');
+      const prob = (results[keys[0]]?.data as Float32Array)?.[0];
+      console.log(`[VAD] output keys: ${outputNames} | first value: ${prob}`);
+    }
 
-    const outputData = results['output'].data as Float32Array;
+    // Update state for next frame — try both 'stateN' and 'hn'
+    this.state = (results['stateN'] ?? results['hn'] ?? results[keys[keys.length - 1]]) as ort.Tensor;
+
+    const outputData = (results['output'] ?? results[keys[0]]).data as Float32Array;
     return { probability: outputData[0] };
   }
 
