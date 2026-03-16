@@ -100,6 +100,7 @@ export class BargeInDetector extends EventEmitter {
 
     // 6. Run Silero VAD
     const { probability } = await this.vad.processFrame(sileroFrame);
+    console.log(`[VAD] probability=${probability.toFixed(3)} threshold=${config.vad.confidenceThreshold}`);
 
     // 7. Apply hold-off hysteresis
     if (probability >= config.vad.confidenceThreshold) {
