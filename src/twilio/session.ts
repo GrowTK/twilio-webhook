@@ -2,10 +2,6 @@
 //
 // State machine:
 //   LISTENING  → PROCESSING → SPEAKING → LISTENING
-//
-//   LISTENING:  Buffer caller audio; VAD detects end-of-utterance (silenceMs) → PROCESSING
-//   PROCESSING: POST audio to voice pipeline → SPEAKING
-//   SPEAKING:   Stream TTS to Twilio; barge-in or natural end → LISTENING
 
 import { WebSocket } from 'ws';
 import { mulawDecode } from '../audio/mulaw';
@@ -18,8 +14,10 @@ import { config } from '../config';
 
 type SessionState = 'LISTENING' | 'PROCESSING' | 'SPEAKING';
 
-// Number of consecutive speech-end events required to trigger end-of-utterance
 const SILENCE_FRAMES_REQUIRED = Math.ceil(config.vad.silenceMs / config.vad.frameMs);
+
+// Fallback: if VAD never detects speech, send accumulated audio after this many ms
+const FALLBACK_SEND_MS = 5000;
 
 export class CallSession {
   private ws: WebSocket;
@@ -31,14 +29,14 @@ export class CallSession {
   private rnnoise: RNNoiseProcessor;
   private bargeInDetector: BargeInDetector;
 
-  // Audio accumulation for utterance detection
   private utteranceBuffer: Int16Array[] = [];
   private silenceFrameCount = 0;
   private hasSpeech = false;
+  private mediaCount = 0;
 
   private streamer: TTSStreamer | null = null;
-  // Set to true if barge-in fires during PROCESSING so we discard the response
   private processingAborted = false;
+  private fallbackTimer: ReturnType<typeof setTimeout> | null = null;
 
   constructor(ws: WebSocket) {
     this.ws = ws;
@@ -61,9 +59,6 @@ export class CallSession {
     console.log(`[Session] Initialized (VAD threshold: ${config.vad.confidenceThreshold})`);
   }
 
-  /**
-   * Handle an incoming Twilio Media Streams WebSocket message.
-   */
   async handleMessage(data: string): Promise<void> {
     let msg: Record<string, unknown>;
     try {
@@ -91,7 +86,15 @@ export class CallSession {
       this.callSid = start.callSid ?? '';
       this.streamSid = start.streamSid ?? '';
     }
-    console.log(`[Session ${this.callSid}] Stream started`);
+    console.log(`[Session ${this.callSid}] Stream started (streamSid: ${this.streamSid})`);
+
+    // Start fallback timer: if VAD never triggers, send whatever we have after 5s
+    this.fallbackTimer = setTimeout(() => {
+      if (this.state === 'LISTENING' && this.utteranceBuffer.length > 0) {
+        console.log(`[Session ${this.callSid}] Fallback timer fired — sending ${this.mediaCount} accumulated frames to pipeline`);
+        this.endUtterance();
+      }
+    }, FALLBACK_SEND_MS);
   }
 
   private async handleMedia(msg: Record<string, unknown>): Promise<void> {
@@ -101,17 +104,24 @@ export class CallSession {
     // Only process inbound (caller) audio — ignore outbound track
     if (media.track && media.track !== 'inbound') return;
 
+    this.mediaCount++;
+
     const buffer = Buffer.from(media.payload, 'base64');
+
+    // Debug: log raw payload info for first few frames
+    if (this.mediaCount <= 3) {
+      const firstBytes = Array.from(buffer.slice(0, 8)).map((b: number) => b.toString(16).padStart(2, '0')).join(' ');
+      console.log(`[Session ${this.callSid}] Media #${this.mediaCount}: track=${media.track ?? 'none'} payloadLen=${buffer.length} firstBytes=[${firstBytes}]`);
+    }
+
     const samples = mulawDecode(buffer);
 
     if (this.state === 'LISTENING') {
       this.utteranceBuffer.push(samples);
       await this.bargeInDetector.feed(samples);
     } else if (this.state === 'SPEAKING') {
-      // Monitor for barge-in during TTS playback
       await this.bargeInDetector.feed(samples);
     }
-    // PROCESSING state: discard inbound audio
   }
 
   private handleSpeechEnd(): void {
@@ -128,26 +138,29 @@ export class CallSession {
       console.log(`[Session ${this.callSid}] Barge-in detected — stopping TTS`);
       this.streamer?.stopGracefully();
     } else if (this.state === 'PROCESSING') {
-      // Mark so processUtterance discards the response when it arrives
       console.log(`[Session ${this.callSid}] Barge-in during PROCESSING — will discard response`);
       this.processingAborted = true;
     }
   }
 
   private handleStop(): void {
-    console.log(`[Session ${this.callSid}] Stream stopped`);
+    console.log(`[Session ${this.callSid}] Stream stopped (received ${this.mediaCount} media frames)`);
     this.destroy();
   }
 
   private endUtterance(): void {
     if (this.state !== 'LISTENING') return;
+    if (this.fallbackTimer) {
+      clearTimeout(this.fallbackTimer);
+      this.fallbackTimer = null;
+    }
 
     const totalSamples = this.utteranceBuffer.reduce(
       (sum, buf) => sum + buf.length, 0
     );
     if (totalSamples === 0) return;
 
-    console.log(`[Session ${this.callSid}] Utterance ended (${totalSamples} samples)`);
+    console.log(`[Session ${this.callSid}] Utterance ended (${totalSamples} samples, ${this.mediaCount} frames)`);
 
     const merged = new Int16Array(totalSamples);
     let offset = 0;
@@ -189,6 +202,7 @@ export class CallSession {
       return;
     }
 
+    console.log(`[Session ${this.callSid}] Pipeline returned audio (${response.audio.length} chars base64)`);
     this.setState('SPEAKING');
     this.streamResponse(response.audio);
   }
@@ -218,12 +232,15 @@ export class CallSession {
     }
 
     if (state === 'SPEAKING') {
-      // Reset barge-in detector so it starts fresh for barge-in monitoring
       this.bargeInDetector.reset();
     }
   }
 
   destroy(): void {
+    if (this.fallbackTimer) {
+      clearTimeout(this.fallbackTimer);
+      this.fallbackTimer = null;
+    }
     this.streamer?.stopImmediate();
     this.streamer = null;
     this.bargeInDetector.destroy();
