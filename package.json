@@ -1,0 +1,28 @@
+{
+  "name": "tavis",
+  "version": "1.0.0",
+  "description": "Smart barge-in voice server for Twilio Media Streams",
+  "main": "dist/server.js",
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsx watch src/server.ts",
+    "start": "node dist/server.js",
+    "download-models": "tsx scripts/download-models.ts",
+    "postbuild": "node dist/scripts/download-models.js"
+  },
+  "dependencies": {
+    "axios": "^1.7.2",
+    "dotenv": "^16.4.5",
+    "express": "^4.19.2",
+    "onnxruntime-node": "^1.18.0",
+    "@shiguredo/rnnoise-wasm": "^2025.1.5",
+    "ws": "^8.17.1"
+  },
+  "devDependencies": {
+    "@types/express": "^4.17.21",
+    "@types/node": "^20.14.9",
+    "@types/ws": "^8.5.11",
+    "tsx": "^4.16.0",
+    "typescript": "^5.5.3"
+  }
+}
