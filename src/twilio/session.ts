@@ -48,6 +48,7 @@ export class CallSession {
 
     this.bargeInDetector.on('barge-in', () => this.handleBargeIn());
     this.bargeInDetector.on('speech-start', () => {
+      console.log(`[Session ${this.callSid}] Speech detected`);
       this.hasSpeech = true;
       this.silenceFrameCount = 0;
     });

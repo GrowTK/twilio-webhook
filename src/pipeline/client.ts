@@ -1,21 +1,12 @@
-// Voice pipeline client — POSTs audio to external AI voice pipeline
-// Returns base64-encoded audio of the AI response
-
 import axios from 'axios';
 import { config } from '../config';
-import { mulawEncode } from '../audio/mulaw';
+import { buildWav } from '../audio/wav';
 
 export interface PipelineResponse {
-  audio: string;       // base64-encoded µ-law 8kHz audio
+  audio: string;
   contentType?: string;
 }
 
-/**
- * Send caller audio to the voice pipeline and receive AI response audio.
- *
- * @param audioSamples - 16-bit PCM samples at 8kHz
- * @param callSid - Twilio call SID for correlation
- */
 export async function sendToPipeline(
   audioSamples: Int16Array,
   callSid: string
@@ -24,8 +15,11 @@ export async function sendToPipeline(
     throw new Error('VOICE_PIPELINE_URL is not configured');
   }
 
-  const mulawBuffer = mulawEncode(audioSamples);
-  const audioBase64 = mulawBuffer.toString('base64');
+  // Send as WAV so Deepgram can properly decode the audio
+  const wavBuffer = buildWav(audioSamples, 8000);
+  const audioBase64 = wavBuffer.toString('base64');
+
+  console.log(`[Pipeline] Sending ${audioSamples.length} samples (${wavBuffer.length} bytes WAV) for call ${callSid}`);
 
   const response = await axios.post<PipelineResponse>(
     config.pipeline.url,
@@ -39,5 +33,6 @@ export async function sendToPipeline(
     }
   );
 
+  console.log(`[Pipeline] Response status: ${response.status}, has audio: ${!!response.data?.audio}`);
   return response.data;
 }
