@@ -98,6 +98,9 @@ export class CallSession {
     const media = msg.media as Record<string, string> | undefined;
     if (!media?.payload) return;
 
+    // Only process inbound (caller) audio — ignore outbound track
+    if (media.track && media.track !== 'inbound') return;
+
     const buffer = Buffer.from(media.payload, 'base64');
     const samples = mulawDecode(buffer);
 
