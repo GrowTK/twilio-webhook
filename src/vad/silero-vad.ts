@@ -7,7 +7,7 @@ import * as path from 'path';
 
 export const SILERO_FRAME_SIZE = 512;
 const SAMPLE_RATE = 16000;
-const STATE_SIZE = 128;
+const STATE_SIZE = 64;
 const NUM_LAYERS = 2;
 
 export interface VADResult {
