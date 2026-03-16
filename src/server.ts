@@ -27,6 +27,7 @@ app.post('/voice', (req, res) => {
 
   const twiml = `<?xml version="1.0" encoding="UTF-8"?>
 <Response>
+  <Say voice="Polly.Joanna">Hello, how can I help you today?</Say>
   <Connect>
     <Stream url="${wsUrl}"/>
   </Connect>
