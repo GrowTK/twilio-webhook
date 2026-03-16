@@ -29,12 +29,7 @@ export async function sendToPipeline(
 
   const response = await axios.post<PipelineResponse>(
     config.pipeline.url,
-    {
-      audio: audioBase64,
-      encoding: 'mulaw',
-      sampleRate: 8000,
-      callSid,
-    },
+    { audio: audioBase64 },
     {
       headers: {
         'Content-Type': 'application/json',
