@@ -6,7 +6,7 @@
   "scripts": {
     "build": "tsc",
     "dev": "tsx watch src/server.ts",
-    "start": "node dist/server.js",
+    "start": "node dist/src/server.js",
     "download-models": "tsx scripts/download-models.ts",
     "postbuild": "node dist/scripts/download-models.js"
   },
