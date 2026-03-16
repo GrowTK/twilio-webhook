@@ -6,8 +6,6 @@
 import { WebSocket } from 'ws';
 import { mulawDecode } from '../audio/mulaw';
 import { BargeInDetector } from '../barge-in/detector';
-import { SileroVAD } from '../vad/silero-vad';
-import { RNNoiseProcessor } from '../noise/rnnoise';
 import { sendToPipeline } from '../pipeline/client';
 import { TTSStreamer } from '../tts/streamer';
 import { config } from '../config';
@@ -25,8 +23,6 @@ export class CallSession {
   private streamSid = '';
   private state: SessionState = 'LISTENING';
 
-  private vad: SileroVAD;
-  private rnnoise: RNNoiseProcessor;
   private bargeInDetector: BargeInDetector;
 
   private utteranceBuffer: Int16Array[] = [];
@@ -40,9 +36,7 @@ export class CallSession {
 
   constructor(ws: WebSocket) {
     this.ws = ws;
-    this.vad = new SileroVAD();
-    this.rnnoise = new RNNoiseProcessor();
-    this.bargeInDetector = new BargeInDetector(this.vad, this.rnnoise);
+    this.bargeInDetector = new BargeInDetector(null, null);
 
     this.bargeInDetector.on('barge-in', () => this.handleBargeIn());
     this.bargeInDetector.on('speech-start', () => {
@@ -54,9 +48,7 @@ export class CallSession {
   }
 
   async initialize(): Promise<void> {
-    await this.vad.initialize();
-    await this.rnnoise.initialize();
-    console.log(`[Session] Initialized (VAD threshold: ${config.vad.confidenceThreshold})`);
+    console.log(`[Session] Initialized (energy-based VAD)`);
   }
 
   async handleMessage(data: string): Promise<void> {
