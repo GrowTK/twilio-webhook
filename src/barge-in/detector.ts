@@ -98,9 +98,15 @@ export class BargeInDetector extends EventEmitter {
     // 5. Pad or trim to exact Silero frame size (512 samples)
     const sileroFrame = padOrTrim(vadInput16k, SILERO_FRAME_SIZE);
 
+    // Debug: log max amplitude to verify audio is present
+    let maxAmp = 0;
+    for (let i = 0; i < sileroFrame.length; i++) {
+      if (Math.abs(sileroFrame[i]) > maxAmp) maxAmp = Math.abs(sileroFrame[i]);
+    }
+
     // 6. Run Silero VAD
     const { probability } = await this.vad.processFrame(sileroFrame);
-    console.log(`[VAD] probability=${probability.toFixed(3)} threshold=${config.vad.confidenceThreshold}`);
+    console.log(`[VAD] probability=${probability.toFixed(3)} maxAmp=${maxAmp.toFixed(4)} threshold=${config.vad.confidenceThreshold}`);
 
     // 7. Apply hold-off hysteresis
     if (probability >= config.vad.confidenceThreshold) {
