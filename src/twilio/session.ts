@@ -8,14 +8,10 @@ import { mulawDecode } from '../audio/mulaw';
 import { BargeInDetector } from '../barge-in/detector';
 import { sendToPipeline } from '../pipeline/client';
 import { TTSStreamer } from '../tts/streamer';
-import { config } from '../config';
-
 type SessionState = 'LISTENING' | 'PROCESSING' | 'SPEAKING';
 
-const SILENCE_FRAMES_REQUIRED = Math.ceil(config.vad.silenceMs / config.vad.frameMs);
-
-// Fallback: if VAD never detects speech, send accumulated audio after this many ms
-const FALLBACK_SEND_MS = 5000;
+// Fallback: if nothing triggers, send accumulated audio after this many ms
+const FALLBACK_SEND_MS = 8000;
 
 export class CallSession {
   private ws: WebSocket;
@@ -26,8 +22,6 @@ export class CallSession {
   private bargeInDetector: BargeInDetector;
 
   private utteranceBuffer: Int16Array[] = [];
-  private silenceFrameCount = 0;
-  private hasSpeech = false;
   private mediaCount = 0;
 
   private streamer: TTSStreamer | null = null;
@@ -41,10 +35,11 @@ export class CallSession {
     this.bargeInDetector.on('barge-in', () => this.handleBargeIn());
     this.bargeInDetector.on('speech-start', () => {
       console.log(`[Session ${this.callSid}] Speech detected`);
-      this.hasSpeech = true;
-      this.silenceFrameCount = 0;
     });
-    this.bargeInDetector.on('speech-end', () => this.handleSpeechEnd());
+    this.bargeInDetector.on('utterance-end', () => {
+      console.log(`[Session ${this.callSid}] Utterance end detected by VAD`);
+      this.endUtterance();
+    });
   }
 
   async initialize(): Promise<void> {
@@ -80,10 +75,9 @@ export class CallSession {
     }
     console.log(`[Session ${this.callSid}] Stream started (streamSid: ${this.streamSid})`);
 
-    // Start fallback timer: if VAD never triggers, send whatever we have after 5s
     this.fallbackTimer = setTimeout(() => {
       if (this.state === 'LISTENING' && this.utteranceBuffer.length > 0) {
-        console.log(`[Session ${this.callSid}] Fallback timer fired — sending ${this.mediaCount} accumulated frames to pipeline`);
+        console.log(`[Session ${this.callSid}] Fallback timer fired — sending ${this.mediaCount} accumulated frames`);
         this.endUtterance();
       }
     }, FALLBACK_SEND_MS);
@@ -93,14 +87,13 @@ export class CallSession {
     const media = msg.media as Record<string, string> | undefined;
     if (!media?.payload) return;
 
-    // Only process inbound (caller) audio — ignore outbound track
+    // Only process inbound (caller) audio
     if (media.track && media.track !== 'inbound') return;
 
     this.mediaCount++;
 
     const buffer = Buffer.from(media.payload, 'base64');
 
-    // Debug: log raw payload info for first few frames
     if (this.mediaCount <= 3) {
       const firstBytes = Array.from(buffer.slice(0, 8)).map((b: number) => b.toString(16).padStart(2, '0')).join(' ');
       console.log(`[Session ${this.callSid}] Media #${this.mediaCount}: track=${media.track ?? 'none'} payloadLen=${buffer.length} firstBytes=[${firstBytes}]`);
@@ -113,15 +106,6 @@ export class CallSession {
       await this.bargeInDetector.feed(samples);
     } else if (this.state === 'SPEAKING') {
       await this.bargeInDetector.feed(samples);
-    }
-  }
-
-  private handleSpeechEnd(): void {
-    if (this.state !== 'LISTENING') return;
-
-    this.silenceFrameCount++;
-    if (this.hasSpeech && this.silenceFrameCount >= SILENCE_FRAMES_REQUIRED) {
-      this.endUtterance();
     }
   }
 
@@ -152,7 +136,7 @@ export class CallSession {
     );
     if (totalSamples === 0) return;
 
-    console.log(`[Session ${this.callSid}] Utterance ended (${totalSamples} samples, ${this.mediaCount} frames)`);
+    console.log(`[Session ${this.callSid}] Sending utterance (${totalSamples} samples, ${(totalSamples / 8000).toFixed(1)}s at 8kHz)`);
 
     const merged = new Int16Array(totalSamples);
     let offset = 0;
@@ -176,11 +160,14 @@ export class CallSession {
     let response;
     try {
       response = await sendToPipeline(samples, this.callSid);
-    } catch (err) {
-      console.error(`[Session ${this.callSid}] Pipeline request failed:`, err);
+    } catch (err: any) {
+      const respData = err?.response?.data;
+      console.error(`[Session ${this.callSid}] Pipeline request failed:`, err?.message, respData ? JSON.stringify(respData) : '');
       this.setState('LISTENING');
       return;
     }
+
+    console.log(`[Session ${this.callSid}] Pipeline response:`, JSON.stringify(response).slice(0, 200));
 
     if (this.processingAborted) {
       console.log(`[Session ${this.callSid}] Discarding pipeline response (barge-in)`);
@@ -218,9 +205,16 @@ export class CallSession {
 
     if (state === 'LISTENING') {
       this.utteranceBuffer = [];
-      this.silenceFrameCount = 0;
-      this.hasSpeech = false;
+      this.mediaCount = 0;
       this.bargeInDetector.reset();
+
+      // Reset fallback timer for next utterance
+      this.fallbackTimer = setTimeout(() => {
+        if (this.state === 'LISTENING' && this.utteranceBuffer.length > 0) {
+          console.log(`[Session ${this.callSid}] Fallback timer fired`);
+          this.endUtterance();
+        }
+      }, FALLBACK_SEND_MS);
     }
 
     if (state === 'SPEAKING') {
