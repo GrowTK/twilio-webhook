@@ -26,6 +26,10 @@ export const config = {
     authToken: process.env.TWILIO_AUTH_TOKEN ?? '',
     phoneNumber: process.env.TWILIO_PHONE_NUMBER ?? '',
   },
+  supabase: {
+    url: process.env.SUPABASE_URL ?? '',
+    serviceRoleKey: process.env.SUPABASE_SERVICE_ROLE_KEY ?? '',
+  },
   server: {
     port: parseInt(process.env.PORT ?? '3000'),
     publicUrl: process.env.PUBLIC_URL ?? '',

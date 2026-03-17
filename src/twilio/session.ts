@@ -17,6 +17,7 @@ export class CallSession {
   private ws: WebSocket;
   private callSid = '';
   private streamSid = '';
+  private callerNumber = '';
   private state: SessionState = 'LISTENING';
 
   private bargeInDetector: BargeInDetector;
@@ -65,6 +66,11 @@ export class CallSession {
         this.handleStop();
         break;
     }
+  }
+
+  setCallerNumber(number: string): void {
+    this.callerNumber = number;
+    console.log(`[Session ${this.callSid}] Caller: ${number}`);
   }
 
   private handleStart(msg: Record<string, unknown>): void {
@@ -159,7 +165,7 @@ export class CallSession {
 
     let response;
     try {
-      response = await sendToPipeline(samples, this.callSid);
+      response = await sendToPipeline(samples, this.callSid, this.callerNumber);
     } catch (err: any) {
       const respData = err?.response?.data;
       console.error(`[Session ${this.callSid}] Pipeline request failed:`, err?.message, respData ? JSON.stringify(respData) : '');
