@@ -1,6 +1,5 @@
 node_modules/
 dist/
-.env
-.env.local
 models/*.onnx
 *.js.map
+config.bat
